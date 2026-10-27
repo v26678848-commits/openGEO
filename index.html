@@ -40,7 +40,7 @@ dialog::backdrop{background:#000a}
 .err{color:var(--bad);min-height:1.2em;margin:0}
 #toast{position:fixed;left:50%;transform:translateX(-50%);top:calc(64px + env(safe-area-inset-top));max-width:min(92vw,520px);background:#0c0d0f;color:#e7e9ec;border:1px solid rgba(255,255,255,.2);padding:10px 14px;border-radius:12px;z-index:300;display:none;box-shadow:0 0 18px rgba(255,255,255,.08)}
 #toast.show{display:block}#toast.bad{border-color:var(--bad)}
-#fatal{position:fixed;inset:0;background:#000;z-index:50;overflow:auto;padding:16px}
+#fatal{position:fixed;inset:0;background:#000;color:#e7e9ec;z-index:50;overflow:auto;padding:16px}#fatal .warn{color:#e0b85a}
 .wbox{max-width:640px;margin:4vh auto}
 
 /* the two canvases: absolutely black, no dots, no grid; objects are told apart by a faint white glow only */
@@ -849,6 +849,13 @@ svg.leaflet-image-layer.leaflet-interactive path {
 <div id="app" hidden><section id="graphwrap" aria-label="Полотно проекта"></section></div>
 <section id="world" aria-label="Проекты" hidden></section>
 <section id="fatal" hidden></section>
+<script>
+(function () { // a start that fails must say why, not stay black
+  function show(t) { var f = document.getElementById('fatal'); if (!f || window.__bootOk || !f.hidden) return; f.hidden = false; f.textContent = 'OpenGEO не запустился. ' + t; }
+  addEventListener('error', function (e) { show((e.message || 'ошибка') + ' [' + String(e.filename || '').split('/').pop() + ':' + (e.lineno || '?') + ']'); });
+  setTimeout(function () { show('Страница не загрузилась за 8 секунд. Закройте другие вкладки OpenGEO и обновите страницу.'); }, 8000);
+})();
+</script>
 <div id="toast" role="status" aria-live="polite"></div>
 <input type="file" id="fileIn" multiple accept="image/*,video/*" hidden>
 <input type="file" id="docIn" multiple hidden>
@@ -877,9 +884,9 @@ const open = () => (dbp ??= new Promise((res, rej) => {
       if (s !== 'projects') st.createIndex('projectId', 'projectId');
     }
   };
-  r.onsuccess = () => res(r.result);
+  r.onsuccess = () => { r.result.onversionchange = () => { r.result.close(); dbp = undefined; }; res(r.result); }; // lets a newer build upgrade the database
   r.onerror = () => rej(r.error);
-  r.onblocked = () => rej(new Error('База заблокирована другой вкладкой'));
+  r.onblocked = () => dispatchEvent(new Event('og-db-blocked')); // an old tab holds the database; the open goes on by itself when it closes
 }));
 
 const run = (mode, fn) => open().then((d) => new Promise((res, rej) => {
@@ -2906,12 +2913,14 @@ function fatal(text) {
 }
 
 async function boot() {
+  addEventListener('og-db-blocked', () => fatal('Другая вкладка OpenGEO держит старую версию базы. Закройте её: загрузка продолжится сама.'));
   try { await db.open(); } catch {
     return fatal('Хранилище браузера недоступно (возможно, приватный режим или запрет на данные сайта). Без него проекты сохранить нельзя. Откройте сайт в обычном режиме браузера.');
   }
   addEventListener('unhandledrejection', (e) => { toast('Что-то пошло не так: ' + (e.reason?.message || 'ошибка'), true); });
   try { S.persisted = (await navigator.storage?.persist?.()) ?? null; } catch { S.persisted = null; }
 
+  $('#fatal').hidden = true; window.__bootOk = true;
   bus.addEventListener('data', render);
   addEventListener('keydown', (e) => { if (e.key === 'Escape' && !document.querySelector('dialog[open], .pmenu')) SP.deselect(); });
   $('#fileIn').onchange = (e) => { const f = [...e.target.files]; e.target.value = ''; if (f.length) SP.picked(f, 'media'); };
